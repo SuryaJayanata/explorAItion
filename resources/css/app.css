@@ -1,0 +1,104 @@
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Montserrat:wght@400;500;600;700;800&family=Poppins:wght@400;500&family=Tilt+Warp&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+.bg-blob {
+    border-radius: 50%;
+    background: rgba(199.32, 68.73, 239.06, 0.2);
+    filter: blur(112.8px);
+    z-index: 0;
+}
+
+.checkmark {
+    width: 27px;
+    height: 27px;
+    background: white;
+    border-radius: 5px;
+    display: inline-block;
+    position: relative;
+    margin-right: 10px;
+    transition: all 0.3s ease;
+}
+
+.checkmark:after {
+    content: "";
+    position: absolute;
+    display: none;
+    left: 9px;
+    top: 5px;
+    width: 7px;
+    height: 12px;
+    border: solid white;
+    border-width: 0 3px 3px 0;
+    transform: rotate(45deg);
+}
+
+input[type="checkbox"]:checked ~ .checkmark {
+    background-color: #BD18EF;
+}
+
+input[type="checkbox"]:checked ~ .checkmark:after {
+    display: block;
+}
+
+/* Custom styles untuk dropdown */
+select {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BD18EF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 1.5em 1.5em;
+}
+
+select:focus {
+    outline: none;
+}
+
+/* Style khusus untuk dropdown role */
+.role-dropdown {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    color: white;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23BD18EF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1.5em 1.5em;
+}
+
+.role-dropdown:hover {
+    border-color: #BD18EF;
+    background-color: rgba(189, 24, 239, 0.1);
+}
+
+.role-dropdown:focus {
+    border-color: #BD18EF;
+    box-shadow: 0 0 0 2px rgba(189, 24, 239, 0.2);
+}
+
+.role-dropdown option {
+    background: #2D1B42;
+    color: white;
+    padding: 0.5rem;
+}
+
+.role-dropdown option:hover {
+    background: #BD18EF;
+}
+
+/* Untuk browser tertentu yang support */
+.role-dropdown::-ms-expand {
+    display: none;
+}
