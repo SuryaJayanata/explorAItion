@@ -49,7 +49,7 @@ class GeminiService
 
             Log::info('Real text extracted from file', [
                 'text_length' => strlen($text),
-                'first_100_chars' => substr($text, 0, 100)
+                'first_500_chars' => substr($text, 0, 500)
             ]);
 
             $result = $this->summarizeText($text, $maxLength);
@@ -90,7 +90,10 @@ class GeminiService
                 
                 case 'txt':
                     $content = file_get_contents($filePath);
-                    Log::info('TXT file content extracted', ['length' => strlen($content)]);
+                    Log::info('TXT file content extracted', [
+                        'length' => strlen($content),
+                        'preview' => substr($content, 0, 300)
+                    ]);
                     return $content;
                 
                 default:
@@ -120,7 +123,7 @@ class GeminiService
             
             Log::info('PDF text extraction successful', [
                 'original_length' => strlen($text),
-                'first_200_chars' => substr($text, 0, 200)
+                'first_500_chars' => substr($text, 0, 500)
             ]);
 
             if (empty($text)) {
@@ -135,7 +138,6 @@ class GeminiService
                 'error' => $e->getMessage()
             ]);
             
-            // Fallback: coba baca sebagai binary atau return error message
             return "PDF tidak dapat diproses: " . $e->getMessage() . ". File mungkin terproteksi atau berupa scan gambar.";
         }
     }
@@ -145,7 +147,7 @@ class GeminiService
         try {
             Log::info('Starting text summarization', [
                 'text_length' => strlen($text),
-                'first_100_chars' => substr($text, 0, 100)
+                'first_200_chars' => substr($text, 0, 200)
             ]);
 
             if (empty(trim($text))) {
@@ -154,9 +156,9 @@ class GeminiService
 
             // Clean text - potong jika terlalu panjang untuk efisiensi
             $text = $this->cleanText($text);
-            $text = $this->truncateText($text, 30000); // Max 30k characters untuk Gemini
+            $text = $this->truncateText($text, 30000);
             
-            // Build prompt yang lebih spesifik
+            // Build prompt yang LEBIH SPESIFIK dan DETAILED
             $prompt = $this->buildSummaryPrompt($text);
 
             Log::info('Sending request to Gemini API');
@@ -171,9 +173,9 @@ class GeminiService
                         ]
                     ],
                     'generationConfig' => [
-                        'temperature' => 0.2,
-                        'topK' => 40,
-                        'topP' => 0.8,
+                        'temperature' => 0.1,
+                        'topK' => 20,
+                        'topP' => 0.7,
                         'maxOutputTokens' => $maxLength,
                     ]
                 ],
@@ -188,19 +190,23 @@ class GeminiService
 
             if (!isset($data['candidates'][0]['content']['parts'][0]['text'])) {
                 Log::error('Invalid Gemini response format', $data);
-                
-                // Fallback: Generate summary manual berdasarkan teks asli
-                return $this->generateFallbackSummary($text);
+                return $this->generateContentBasedSummary($text);
             }
 
             $summary = trim($data['candidates'][0]['content']['parts'][0]['text']);
+            
+            // Validasi apakah summary mengandung konten spesifik atau masih generic
+            if ($this->isGenericSummary($summary)) {
+                Log::warning('Summary masih generic, menggunakan content-based approach');
+                return $this->generateContentBasedSummary($text);
+            }
             
             // Bersihkan format markdown
             $summary = $this->cleanMarkdownFormat($summary);
             
             Log::info('Summary generated successfully', [
                 'summary_length' => strlen($summary),
-                'first_100_chars' => substr($summary, 0, 100)
+                'first_200_chars' => substr($summary, 0, 200)
             ]);
 
             return [
@@ -211,9 +217,7 @@ class GeminiService
             
         } catch (RequestException $e) {
             Log::error('Gemini API Request failed', ['error' => $e->getMessage()]);
-            
-            // Fallback jika API error
-            return $this->generateFallbackSummary($text);
+            return $this->generateContentBasedSummary($text);
             
         } catch (Exception $e) {
             Log::error('Summarization failed', ['error' => $e->getMessage()]);
@@ -226,67 +230,255 @@ class GeminiService
 
     private function buildSummaryPrompt($text)
     {
-        return "Buatlah ringkasan yang AKURAT dan RELEVAN dari teks materi pembelajaran berikut. 
+        return "ANALISIS TEKS MATERI PEMBELAJARAN BERIKUT DAN BUAT RINGKASAN YANG SPESIFIK:
 
-**TEKS ASLI MATERI:**
+**TEKS ASLI:**
 {$text}
 
-**INSTRUKSI:**
-1. Buat ringkasan yang SESUAI dengan konten teks di atas
-2. Fokus pada poin-poin penting yang benar-benar ada dalam teks
-3. Jangan menambahkan informasi yang tidak ada dalam teks asli
-4. Gunakan Bahasa Indonesia yang baik dan benar
-5. Struktur yang jelas dan mudah dipahami
-6. Maksimal 400 kata
-7. JANGAN gunakan format markdown (#, -, *)
+**INSTRUKSI DETAIL:**
+1. BACA dan ANALISIS seluruh teks di atas dengan cermat
+2. IDENTIFIKASI topik-topik SPESIFIK yang benar-benar dibahas dalam teks
+3. EKSTRAK konsep-konsep NYATA yang dijelaskan, bukan generalisasi
+4. GUNAKEN BAHASA INDONESIA yang jelas dan terstruktur
+5. FOKUS pada konten yang ADA dalam teks, JANGAN menambahkan informasi dari luar
+6. Untuk setiap bagian, berikan INFORMASI SPESIFIK dari teks
 
-**FORMAT OUTPUT:**
-Ringkasan Materi
+**FORMAT OUTPUT WAJIB:**
 
-Poin-Poin Utama
-[jelaskan poin-poin utama yang ada dalam teks]
+RINGKASAN MATERI
+[Jelaskan secara spesifik materi apa yang dibahas, sebutkan judul/topik utama]
 
-Konsep Penting
-[uraikan konsep-konsep penting yang dibahas]
+TOPIK-TOPIK YANG DIBAHAS
+1. [Nama topik pertama - ambil dari teks asli]
+   • [Penjelasan spesifik tentang topik ini dari teks]
+   • [Konsep penting yang dijelaskan]
 
-Kesimpulan
-[berikan kesimpulan yang relevan dengan materi]";
+2. [Nama topik kedua - ambil dari teks asli] 
+   • [Penjelasan spesifik tentang topik ini dari teks]
+   • [Konsep penting yang dijelaskan]
+
+3. [Lanjutkan untuk topik-topik lainnya...]
+
+KONSEP PENTING
+• [Konsep pertama yang spesifik dari teks]
+• [Konsep kedua yang spesifik dari teks] 
+• [Konsep ketiga yang spesifik dari teks]
+
+HASIL PEMBELAJARAN
+[Sebutkan secara spesifik kompetensi atau tujuan pembelajaran yang disebutkan dalam teks]
+
+CATATAN: JANGAN gunakan kalimat general seperti 'materi ini membahas konsep-konsep penting' atau 'beberapa poin kunci yang diangkat'. HARUS spesifik berdasarkan isi teks!";
     }
 
-    private function generateFallbackSummary($text)
+    private function isGenericSummary($summary)
     {
-        Log::info('Generating fallback summary from real text');
+        $genericPatterns = [
+            '/materi ini membahas konsep-konsep penting/i',
+            '/beberapa poin kunci yang diangkat/i',
+            '/aspek-aspek fundamental/i',
+            '/pemahaman yang komprehensif/i',
+            '/topik yang disajikan/i',
+            '/Berdasarkan materi, pembahasan mencakup:/i'
+        ];
         
-        // Ambil beberapa kalimat pertama dari teks asli sebagai fallback
-        $sentences = preg_split('/(?<=[.?!])\s+/', $text, 6);
-        $firstSentences = array_slice($sentences, 0, 5);
-        $keyContent = implode(' ', $firstSentences);
+        foreach ($genericPatterns as $pattern) {
+            if (preg_match($pattern, $summary)) {
+                return true;
+            }
+        }
         
-        // Identifikasi topik dari teks
-        $words = str_word_count($text, 1);
-        $commonWords = array_slice($words, 0, 20);
-        $topic = implode(' ', array_slice($commonWords, 0, 5));
-        
-        $summary = "Ringkasan Materi\n\n";
-        $summary .= "Poin-Poin Utama\n";
-        $summary .= "Berdasarkan materi, pembahasan mencakup: " . $topic . ". ";
-        $summary .= "Materi ini membahas konsep-konsep penting yang relevan dengan topik yang disajikan.\n\n";
-        
-        $summary .= "Konsep Penting\n";
-        $summary .= "Beberapa poin kunci yang diangkat dalam materi antara lain aspek-aspek fundamental ";
-        $summary .= "yang perlu dipahami untuk menguasai topik ini secara komprehensif.\n\n";
-        
-        $summary .= "Kesimpulan\n";
-        $summary .= "Materi ini memberikan dasar pemahaman yang penting. " . $keyContent;
+        return false;
+    }
 
-        Log::info('Fallback summary generated', ['length' => strlen($summary)]);
+    private function generateContentBasedSummary($text)
+    {
+        Log::info('Generating CONTENT-BASED summary from real text');
+        
+        $contentAnalysis = $this->analyzeContent($text);
+        
+        $summary = "RINGKASAN MATERI\n";
+        $summary .= $contentAnalysis['ringkasan_materi'] . "\n\n";
+        
+        $summary .= "TOPIK-TOPIK YANG DIBAHAS\n";
+        foreach ($contentAnalysis['topik'] as $index => $topik) {
+            $summary .= ($index + 1) . ". " . $topik['nama'] . "\n";
+            foreach ($topik['poin'] as $poin) {
+                $summary .= "   • " . $poin . "\n";
+            }
+            $summary .= "\n";
+        }
+        
+        $summary .= "KONSEP PENTING\n";
+        foreach ($contentAnalysis['konsep_penting'] as $konsep) {
+            $summary .= "• " . $konsep . "\n";
+        }
+        
+        $summary .= "\nHASIL PEMBELAJARAN\n";
+        $summary .= $contentAnalysis['hasil_pembelajaran'];
+
+        Log::info('Content-based summary generated', [
+            'length' => strlen($summary),
+            'topics_count' => count($contentAnalysis['topik']),
+            'concepts_count' => count($contentAnalysis['konsep_penting'])
+        ]);
 
         return [
             'success' => true,
             'summary' => $summary,
             'length' => strlen($summary),
-            'fallback' => true
+            'content_based' => true
         ];
+    }
+
+    private function analyzeContent($text)
+    {
+        $analysis = [
+            'ringkasan_materi' => '',
+            'topik' => [],
+            'konsep_penting' => [],
+            'hasil_pembelajaran' => ''
+        ];
+        
+        $lines = explode("\n", $text);
+        $firstLines = array_slice($lines, 0, 10);
+        
+        foreach ($firstLines as $line) {
+            $cleanLine = trim($line);
+            if (strlen($cleanLine) > 20 && strlen($cleanLine) < 200) {
+                if (preg_match('/(modul|materi|bab|kelas|xi|xi\s*|ipa|ipas)/i', $cleanLine)) {
+                    $analysis['ringkasan_materi'] = $cleanLine;
+                    break;
+                }
+            }
+        }
+        
+        if (empty($analysis['ringkasan_materi'])) {
+            $analysis['ringkasan_materi'] = "Materi pembelajaran berdasarkan konten teks yang tersedia";
+        }
+        
+        $topics = $this->extractTopics($text);
+        $analysis['topik'] = array_slice($topics, 0, 5);
+        
+        $analysis['konsep_penting'] = $this->extractKeyConcepts($text);
+        
+        $analysis['hasil_pembelajaran'] = $this->extractLearningOutcomes($text);
+        
+        return $analysis;
+    }
+
+    private function extractTopics($text)
+    {
+        $topics = [];
+        
+        $patterns = [
+            '/(?:topik|materi|bab|pokok\s*bahasan)\s*[:\.]\s*([^\n\.]+)/i',
+            '/(?:pengertian|definisi)\s+(?:[^\.]+)\.\s*([^\.]+)/i',
+            '/(?:klasifikasi|jenis|macam)\s+([^\.]+)/i',
+            '/(?:perubahan|proses)\s+([^\.]+)/i',
+            '/(?:metode|teknik|cara)\s+([^\.]+)/i'
+        ];
+        
+        foreach ($patterns as $pattern) {
+            if (preg_match_all($pattern, $text, $matches)) {
+                foreach ($matches[1] as $match) {
+                    $cleanTopic = trim($match);
+                    if (strlen($cleanTopic) > 10 && strlen($cleanTopic) < 100) {
+                        $topics[] = [
+                            'nama' => $cleanTopic,
+                            'poin' => $this->extractTopicPoints($cleanTopic, $text)
+                        ];
+                    }
+                }
+            }
+        }
+        
+        if (empty($topics)) {
+            $sentences = preg_split('/(?<=[.?!])\s+/', $text);
+            foreach ($sentences as $sentence) {
+                if (strlen($sentence) > 50 && strlen($sentence) < 200) {
+                    $topics[] = [
+                        'nama' => substr($sentence, 0, 50) . '...',
+                        'poin' => [substr($sentence, 0, 100)]
+                    ];
+                }
+            }
+        }
+        
+        return array_slice($topics, 0, 5);
+    }
+
+    private function extractTopicPoints($topic, $text)
+    {
+        $points = [];
+        
+        $sentences = preg_split('/(?<=[.?!])\s+/', $text);
+        $topicLower = strtolower($topic);
+        
+        foreach ($sentences as $sentence) {
+            if (stripos($sentence, $topicLower) !== false && strlen($sentence) > 20) {
+                $cleanSentence = trim($sentence);
+                if (strlen($cleanSentence) < 150) {
+                    $points[] = $cleanSentence;
+                }
+            }
+            
+            if (count($points) >= 3) break;
+        }
+        
+        return array_slice($points, 0, 3);
+    }
+
+    private function extractKeyConcepts($text)
+    {
+        $concepts = [];
+        
+        $importantTerms = [
+            'klasifikasi', 'perubahan', 'metode', 'pemisahan', 'campuran',
+            'unsur', 'senyawa', 'fisika', 'kimia', 'sifat', 'contoh',
+            'proses', 'teknik', 'percobaan', 'langkah', 'hasil'
+        ];
+        
+        $sentences = preg_split('/(?<=[.?!])\s+/', $text);
+        
+        foreach ($sentences as $sentence) {
+            foreach ($importantTerms as $term) {
+                if (stripos($sentence, $term) !== false && strlen($sentence) > 30) {
+                    $cleanConcept = trim($sentence);
+                    if (strlen($cleanConcept) < 120) {
+                        $concepts[] = $cleanConcept;
+                        break;
+                    }
+                }
+            }
+            
+            if (count($concepts) >= 8) break;
+        }
+        
+        return array_slice(array_unique($concepts), 0, 6);
+    }
+
+    private function extractLearningOutcomes($text)
+    {
+        $patterns = [
+            '/(?:kompetensi|tujuan|hasil\s*belajar)[^\.]+\.\s*([^\.]+)/i',
+            '/(?:mampu|dapat|bisa)\s+([^\.]+)/i',
+            '/(?:memahami|menjelaskan|mengidentifikasi)\s+([^\.]+)/i'
+        ];
+        
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $text, $matches)) {
+                return trim($matches[1]);
+            }
+        }
+        
+        $sentences = preg_split('/(?<=[.?!])\s+/', $text);
+        foreach ($sentences as $sentence) {
+            if (strlen($sentence) > 40 && strlen($sentence) < 150) {
+                return $sentence;
+            }
+        }
+        
+        return "Memahami konsep-konsep penting yang dibahas dalam materi";
     }
 
     private function generateFlashcards($summary, $count = 5)
@@ -296,39 +488,38 @@ Kesimpulan
                 'summary_length' => strlen($summary),
                 'requested_count' => $count
             ]);
-    
+
             $flashcards = [];
-    
-            // Parse summary untuk ekstrak konten yang meaningful
+
             $content = $this->extractContentFromSummary($summary);
             
             Log::info('Content extracted from summary', [
-                'poin_utama' => $content['poin_utama'] ?? 'Not found',
-                'konsep_penting' => $content['konsep_penting'] ?? 'Not found',
-                'kesimpulan' => $content['kesimpulan'] ?? 'Not found'
+                'topik_count' => count($content['topik'] ?? []),
+                'konsep_penting_count' => count($content['konsep_penting'] ?? [])
             ]);
-    
-            // Generate flashcards berdasarkan konten yang diekstrak
+
             $flashcards = $this->createContentBasedFlashcards($content, $count);
-    
+
+            $flashcards = $this->cleanFlashcardData($flashcards);
+
             Log::info('Content-based flashcards generated', ['count' => count($flashcards)]);
             return $flashcards;
-    
+
         } catch (Exception $e) {
             Log::error('Intelligent flashcard generation failed', ['error' => $e->getMessage()]);
-            return $this->createSimpleFlashcards($summary, $count);
+            $simpleFlashcards = $this->createSimpleFlashcards($summary, $count);
+            return $this->cleanFlashcardData($simpleFlashcards);
         }
     }
-    
+
     private function extractContentFromSummary($summary)
     {
         $content = [
-            'poin_utama' => [],
+            'topik' => [],
             'konsep_penting' => [],
-            'kesimpulan' => ''
+            'hasil_pembelajaran' => ''
         ];
     
-        // Split summary by lines
         $lines = explode("\n", $summary);
         $currentSection = '';
     
@@ -337,36 +528,35 @@ Kesimpulan
             
             if (empty($line)) continue;
     
-            // Deteksi section headers
-            if (str_contains(strtolower($line), 'poin-poin utama') || 
-                str_contains(strtolower($line), 'poin utama')) {
-                $currentSection = 'poin_utama';
+            if (str_contains(strtolower($line), 'ringkasan materi')) {
+                $currentSection = 'ringkasan';
                 continue;
-            } elseif (str_contains(strtolower($line), 'konsep penting') || 
-                     str_contains(strtolower($line), 'konsep kunci')) {
+            } elseif (str_contains(strtolower($line), 'topik-topik yang dibahas')) {
+                $currentSection = 'topik';
+                continue;
+            } elseif (str_contains(strtolower($line), 'konsep penting')) {
                 $currentSection = 'konsep_penting';
                 continue;
-            } elseif (str_contains(strtolower($line), 'kesimpulan')) {
-                $currentSection = 'kesimpulan';
-                continue;
-            } elseif (str_contains(strtolower($line), 'ringkasan materi')) {
-                $currentSection = '';
+            } elseif (str_contains(strtolower($line), 'hasil pembelajaran')) {
+                $currentSection = 'hasil_pembelajaran';
                 continue;
             }
     
-            // Tambahkan konten ke section yang sesuai
-            if ($currentSection && strlen($line) > 10) { // Minimal 10 karakter
-                if ($currentSection === 'kesimpulan') {
-                    $content[$currentSection] .= $line . ' ';
-                } else {
-                    $content[$currentSection][] = $line;
+            if ($currentSection === 'topik' && preg_match('/^\d+\.\s*(.+)/', $line, $matches)) {
+                $content['topik'][] = ['nama' => trim($matches[1]), 'poin' => []];
+            } elseif ($currentSection === 'topik' && str_starts_with($line, '•')) {
+                $lastTopic = end($content['topik']);
+                if ($lastTopic) {
+                    $content['topik'][key($content['topik'])]['poin'][] = trim(substr($line, 1));
                 }
+            } elseif ($currentSection === 'konsep_penting' && str_starts_with($line, '•')) {
+                $content['konsep_penting'][] = trim(substr($line, 1));
+            } elseif ($currentSection === 'hasil_pembelajaran' && !empty($line)) {
+                $content['hasil_pembelajaran'] .= $line . ' ';
             }
         }
     
-        // Clean up
-        $content['kesimpulan'] = trim($content['kesimpulan']);
-    
+        $content['hasil_pembelajaran'] = trim($content['hasil_pembelajaran']);
         return $content;
     }
     
@@ -375,198 +565,61 @@ Kesimpulan
         $flashcards = [];
         $usedQuestions = [];
     
-        // Flashcard 1: Topik Utama (dari Poin Utama)
-        if (!empty($content['poin_utama']) && count($flashcards) < $count) {
-            $firstMainPoint = $content['poin_utama'][0] ?? '';
-            if (strlen($firstMainPoint) > 20) {
+        if (!empty($content['topik']) && count($flashcards) < $count) {
+            foreach ($content['topik'] as $index => $topik) {
+                if (count($flashcards) >= $count) break;
+                
                 $flashcards[] = [
-                    'pertanyaan' => "Apa topik utama yang dibahas dalam materi ini?",
-                    'jawaban' => $this->extractMainTopic($firstMainPoint),
+                    'pertanyaan' => "Apa yang dimaksud dengan " . $topik['nama'] . "?",
+                    'jawaban' => !empty($topik['poin']) ? implode("\n", $topik['poin']) : "Konsep yang dibahas dalam materi",
                     'id' => count($flashcards) + 1
                 ];
-                $usedQuestions[] = 'topik_utama';
             }
+            $usedQuestions[] = 'topik';
         }
     
-        // Flashcard 2: Poin-Poin Penting
-        if (!empty($content['poin_utama']) && count($flashcards) < $count) {
-            $mainPoints = array_slice($content['poin_utama'], 0, 3); // Ambil max 3 poin
-            $answer = "Poin-poin utama dalam materi ini meliputi:\n";
-            foreach ($mainPoints as $index => $point) {
-                $cleanPoint = $this->cleanFlashcardAnswer($point);
-                if (strlen($cleanPoint) > 10) {
-                    $answer .= "• " . $cleanPoint . "\n";
-                }
-            }
-            
-            if (strlen($answer) > 50) {
-                $flashcards[] = [
-                    'pertanyaan' => "Sebutkan poin-poin penting yang dibahas dalam materi!",
-                    'jawaban' => trim($answer),
-                    'id' => count($flashcards) + 1
-                ];
-                $usedQuestions[] = 'poin_penting';
-            }
-        }
-    
-        // Flashcard 3: Konsep Kunci
         if (!empty($content['konsep_penting']) && count($flashcards) < $count) {
-            $keyConcepts = array_slice($content['konsep_penting'], 0, 2);
-            $answer = "Konsep-konsep kunci yang perlu dipahami:\n";
-            foreach ($keyConcepts as $concept) {
-                $cleanConcept = $this->cleanFlashcardAnswer($concept);
-                if (strlen($cleanConcept) > 10) {
-                    $answer .= "• " . $cleanConcept . "\n";
-                }
-            }
-            
-            if (strlen($answer) > 50) {
+            foreach ($content['konsep_penting'] as $index => $konsep) {
+                if (count($flashcards) >= $count) break;
+                
                 $flashcards[] = [
-                    'pertanyaan' => "Apa saja konsep kunci yang dijelaskan dalam materi?",
-                    'jawaban' => trim($answer),
+                    'pertanyaan' => "Jelaskan konsep: " . $this->createQuestionFromConcept($konsep),
+                    'jawaban' => $konsep,
                     'id' => count($flashcards) + 1
                 ];
-                $usedQuestions[] = 'konsep_kunci';
             }
+            $usedQuestions[] = 'konsep';
         }
     
-        // Flashcard 4: Kesimpulan
-        if (!empty($content['kesimpulan']) && strlen($content['kesimpulan']) > 20 && count($flashcards) < $count) {
+        if (!empty($content['hasil_pembelajaran']) && count($flashcards) < $count) {
             $flashcards[] = [
-                'pertanyaan' => "Apa kesimpulan utama dari materi ini?",
-                'jawaban' => $this->cleanFlashcardAnswer($content['kesimpulan']),
+                'pertanyaan' => "Apa tujuan pembelajaran materi ini?",
+                'jawaban' => $content['hasil_pembelajaran'],
                 'id' => count($flashcards) + 1
             ];
-            $usedQuestions[] = 'kesimpulan';
-        }
-    
-        // Flashcard 5: Tujuan Pembelajaran
-        if (!empty($content['poin_utama']) && count($flashcards) < $count) {
-            $firstPoint = $content['poin_utama'][0] ?? '';
-            if (strlen($firstPoint) > 30) {
-                $flashcards[] = [
-                    'pertanyaan' => "Apa tujuan dari mempelajari materi ini?",
-                    'jawaban' => "Materi ini bertujuan untuk memahami " . $this->extractLearningObjective($firstPoint),
-                    'id' => count($flashcards) + 1
-                ];
-                $usedQuestions[] = 'tujuan';
-            }
-        }
-    
-        // Jika masih kurang, tambahkan flashcards generik berdasarkan konten
-        $remaining = $count - count($flashcards);
-        if ($remaining > 0) {
-            $genericFlashcards = $this->createGenericFlashcards($content, $remaining, $usedQuestions);
-            $flashcards = array_merge($flashcards, $genericFlashcards);
+            $usedQuestions[] = 'tujuan';
         }
     
         return $flashcards;
     }
     
-    private function extractMainTopic($text)
+    private function createQuestionFromConcept($concept)
     {
-        // Bersihkan teks dan ambil kalimat pertama yang meaningful
-        $cleanText = $this->cleanFlashcardAnswer($text);
-        $sentences = preg_split('/(?<=[.?!])\s+/', $cleanText, 2);
-        
-        return $sentences[0] ?? "Topik utama materi pembelajaran";
+        $firstSentence = preg_split('/[.!?]/', $concept)[0];
+        return substr($firstSentence, 0, 50) . (strlen($firstSentence) > 50 ? '...' : '');
     }
-    
-    private function extractLearningObjective($text)
+
+    private function cleanFlashcardData($flashcards)
     {
-        $cleanText = $this->cleanFlashcardAnswer($text);
-        
-        // Coba ekstrak tujuan pembelajaran dari teks
-        if (str_contains(strtolower($cleanText), 'tujuan') || 
-            str_contains(strtolower($cleanText), 'untuk') ||
-            str_contains(strtolower($cleanText), 'agar')) {
-            return $cleanText;
-        }
-        
-        return "konsep-konsep fundamental yang dibahas dalam materi";
-    }
-    
-    private function createGenericFlashcards($content, $count, $usedQuestions)
-    {
-        $flashcards = [];
-        $availableQuestions = [
-            'definisi' => "Apa definisi dari konsep utama yang dibahas?",
-            'manfaat' => "Apa manfaat mempelajari materi ini?",
-            'contoh' => "Beri contoh penerapan konsep yang dijelaskan!",
-            'hubungan' => "Bagaimana hubungan antara berbagai konsep yang dibahas?",
-            'implementasi' => "Bagaimana cara mengimplementasikan konsep ini?",
-            'perbedaan' => "Apa perbedaan antara konsep-konsep yang dijelaskan?",
-            'pentingnya' => "Mengapa materi ini penting untuk dipelajari?",
-            'aplikasi' => "Di bidang apa saja konsep ini dapat diaplikasikan?"
-        ];
-    
-        $questionKeys = array_diff(array_keys($availableQuestions), $usedQuestions);
-        shuffle($questionKeys);
-    
-        foreach (array_slice($questionKeys, 0, $count) as $questionKey) {
-            $answer = $this->generateGenericAnswer($questionKey, $content);
-            $flashcards[] = [
-                'pertanyaan' => $availableQuestions[$questionKey],
-                'jawaban' => $answer,
-                'id' => count($flashcards) + 1
+        return array_map(function($flashcard) {
+            return [
+                'id' => $flashcard['id'] ?? null,
+                'pertanyaan' => $this->cleanText($flashcard['pertanyaan'] ?? ''),
+                'jawaban' => $this->cleanText($flashcard['jawaban'] ?? ''),
             ];
-        }
-    
-        return $flashcards;
+        }, $flashcards);
     }
-    
-    private function generateGenericAnswer($questionType, $content)
-    {
-        switch ($questionType) {
-            case 'definisi':
-                $firstConcept = $content['konsep_penting'][0] ?? $content['poin_utama'][0] ?? '';
-                return $firstConcept ?: "Konsep utama yang dibahas dalam materi ini.";
-                
-            case 'manfaat':
-                return "Memahami materi ini membantu dalam " . 
-                       ($content['kesimpulan'] ?: "penguasaan konsep-konsep penting yang dibahas.");
-                
-            case 'contoh':
-                $mainTopic = $content['poin_utama'][0] ?? '';
-                return "Contoh penerapannya dapat dilihat dalam " . 
-                       ($mainTopic ?: "berbagai situasi yang relevan dengan topik.");
-                
-            case 'hubungan':
-                return "Konsep-konsep tersebut saling terkait dan membentuk pemahaman yang komprehensif.";
-                
-            case 'implementasi':
-                return "Dapat diimplementasikan melalui penerapan langkah-langkah praktis yang dijelaskan.";
-                
-            case 'perbedaan':
-                return "Masing-masing konsep memiliki karakteristik dan penerapan yang berbeda.";
-                
-            case 'pentingnya':
-                return "Materi ini penting karena memberikan dasar pemahaman yang fundamental.";
-                
-            case 'aplikasi':
-                return "Konsep ini dapat diaplikasikan dalam berbagai bidang terkait.";
-                
-            default:
-                return "Jawaban berdasarkan konten materi yang telah dipelajari.";
-        }
-    }
-    
-    private function cleanFlashcardAnswer($text)
-    {
-        // Hapus karakter khusus dan format yang tidak perlu
-        $text = preg_replace('/[^\x20-\x7E\xA0-\xFF\p{L}\p{N}\p{P}\s]/u', '', $text);
-        $text = preg_replace('/\s+/', ' ', $text);
-        $text = trim($text);
-        
-        // Hapus "Ringkasan Materi" jika ada di awal
-        if (strpos(strtolower($text), 'ringkasan materi') === 0) {
-            $text = substr($text, strlen('Ringkasan Materi'));
-        }
-        
-        return trim($text);
-    }
-    
-    // Fallback method untuk summary yang terlalu pendek
+
     private function createSimpleFlashcards($summary, $count)
     {
         Log::info('Creating simple flashcards as fallback');
@@ -593,22 +646,23 @@ Kesimpulan
     
         return $flashcards;
     }
+    
+    private function cleanFlashcardAnswer($text)
+    {
+        $text = preg_replace('/[^\x20-\x7E\xA0-\xFF\p{L}\p{N}\p{P}\s]/u', '', $text);
+        $text = preg_replace('/\s+/', ' ', $text);
+        $text = trim($text);
+        
+        return $text;
+    }
+
     private function cleanMarkdownFormat($text)
     {
-        // Hapus markdown headers
         $text = preg_replace('/^#+\s*/m', '', $text);
-        
-        // Hapus markdown list items
         $text = preg_replace('/^[\-\*\+]\s*/m', '', $text);
-        
-        // Hapus markdown bold/italic
         $text = preg_replace('/\*\*(.*?)\*\*/', '$1', $text);
         $text = preg_replace('/\*(.*?)\*/', '$1', $text);
-        
-        // Hapus markdown links
         $text = preg_replace('/\[(.*?)\]\(.*?\)/', '$1', $text);
-        
-        // Hapus extra whitespace
         $text = preg_replace('/\n\s*\n\s*\n/', "\n\n", $text);
         $text = preg_replace('/^\s+/m', '', $text);
         
@@ -633,10 +687,14 @@ Kesimpulan
 
     private function cleanText($text)
     {
-        // Remove extra whitespace
-        $text = preg_replace('/\s+/', ' ', $text);
+        if (!is_string($text)) {
+            return '';
+        }
         
-        // Remove special characters but keep basic punctuation and Indonesian characters
+        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+        $text = preg_replace('/[^\x{0000}-\x{FFFF}]/u', '', $text);
+        $text = preg_replace('/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+        $text = preg_replace('/\s+/', ' ', $text);
         $text = preg_replace('/[^\x20-\x7E\xA0-\xFF\p{L}\p{N}\p{P}]/u', ' ', $text);
         
         return trim($text);

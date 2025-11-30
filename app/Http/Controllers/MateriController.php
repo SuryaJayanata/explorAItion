@@ -263,82 +263,112 @@ class MateriController extends Controller
 
     public function generateSummary(Request $request, $kelasId, $materiId)
     {
-        \Log::info('Generate Summary called', [
-            'kelasId' => $kelasId, 
-            'materiId' => $materiId,
-            'include_flashcards' => $request->input('include_flashcards'),
-            'flashcard_count' => $request->input('flashcard_count')
-        ]);
-        
-        $kelas = Kelas::findOrFail($kelasId);
-        $materi = Materi::findOrFail($materiId);
-        
-        $this->authorize('view', $materi);
-    
-        // Cek apakah materi memiliki file
-        if (!$materi->file) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Materi tidak memiliki file untuk diringkas.'
-            ], 422);
-        }
-    
         try {
-            $includeFlashcards = $request->input('include_flashcards', false);
-            $flashcardCount = $request->input('flashcard_count', 5);
-    
-            // Generate summary menggunakan Gemini Service
-            $result = $this->geminiService->summarizeFile($materi->file, $includeFlashcards, $flashcardCount);
+            $materi = Materi::findOrFail($materiId);
             
-            \Log::info('Summary generation result', [
-                'success' => $result['success'],
-                'has_flashcards' => !empty($result['flashcards'])
-            ]);
-            
-            if (!$result['success']) {
+            // Authorization - hanya guru kelas yang bisa generate summary
+            $kelas = Kelas::findOrFail($kelasId);
+            if ($kelas->id_guru !== Auth::id()) {
                 return response()->json([
                     'success' => false,
-                    'message' => $result['error']
+                    'error' => 'Unauthorized action.'
+                ], 403);
+            }
+    
+            $includeFlashcards = $request->get('include_flashcards', false);
+            $flashcardCount = $request->get('flashcard_count', 5);
+    
+            \Log::info('Starting summary generation', [
+                'materi_id' => $materiId,
+                'include_flashcards' => $includeFlashcards,
+                'flashcard_count' => $flashcardCount
+            ]);
+    
+            $result = $this->geminiService->summarizeFile(
+                $materi->file_materi, 
+                $includeFlashcards, 
+                $flashcardCount
+            );
+    
+            if ($result['success']) {
+                // Prepare data for update
+                $updateData = [
+                    'summary' => $result['summary']
+                ];
+    
+                // Add flashcards if included
+                if ($includeFlashcards && isset($result['flashcards'])) {
+                    // Clean flashcards data sebelum menyimpan
+                    $cleanedFlashcards = array_map(function($flashcard) {
+                        return [
+                            'id' => $flashcard['id'] ?? null,
+                            'pertanyaan' => $this->cleanText($flashcard['pertanyaan'] ?? ''),
+                            'jawaban' => $this->cleanText($flashcard['jawaban'] ?? ''),
+                        ];
+                    }, $result['flashcards']);
+                    
+                    $updateData['flashcards'] = $cleanedFlashcards;
+                }
+    
+                // Update materi dengan data yang sudah dibersihkan
+                $materi->update($updateData);
+    
+                \Log::info('Summary generated successfully', [
+                    'materi_id' => $materiId,
+                    'summary_length' => strlen($result['summary']),
+                    'has_flashcards' => $includeFlashcards && isset($result['flashcards'])
+                ]);
+    
+                return response()->json([
+                    'success' => true,
+                    'summary' => $result['summary'],
+                    'flashcards' => $includeFlashcards ? ($result['flashcards'] ?? []) : [],
+                    'message' => 'Summary berhasil di-generate!'
+                ]);
+            } else {
+                \Log::error('Summary generation failed', [
+                    'materi_id' => $materiId,
+                    'error' => $result['error']
+                ]);
+    
+                return response()->json([
+                    'success' => false,
+                    'error' => $result['error']
                 ], 500);
             }
     
-            // Simpan summary dan flashcards ke database
-            $updateData = [
-                'summary' => $result['summary'],
-                'summary_generated_at' => now(),
-            ];
-    
-            if ($includeFlashcards && !empty($result['flashcards'])) {
-                $updateData['flashcards'] = $result['flashcards'];
-            }
-    
-            $materi->update($updateData);
-    
-            $message = 'Ringkasan berhasil dibuat menggunakan AI!';
-            if ($includeFlashcards && !empty($result['flashcards'])) {
-                $message .= ' ' . count($result['flashcards']) . ' flashcards juga telah dibuat.';
-            }
-    
-            return response()->json([
-                'success' => true,
-                'summary' => $materi->getFormattedSummary(),
-                'message' => $message,
-                'flashcards_count' => $includeFlashcards ? count($result['flashcards'] ?? []) : 0
-            ]);
-    
         } catch (\Exception $e) {
-            \Log::error('Summary generation error', [
-                'materi_id' => $materi->id_materi,
-                'error' => $e->getMessage()
+            \Log::error('Error in generateSummary', [
+                'materi_id' => $materiId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
     
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan sistem: ' . $e->getMessage()
+                'error' => 'Terjadi kesalahan sistem: ' . $e->getMessage()
             ], 500);
         }
     }
-
+    
+    // Helper method untuk clean text
+    private function cleanText($text)
+    {
+        if (!is_string($text)) {
+            return '';
+        }
+        
+        // Convert to UTF-8
+        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8');
+        
+        // Remove invalid UTF-8 characters
+        $text = preg_replace('/[^\x{0000}-\x{FFFF}]/u', '', $text);
+        
+        // Remove control characters
+        $text = preg_replace('/[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]/', '', $text);
+        
+        return trim($text);
+    }
     public function downloadSummary($kelasId, $materiId)
     {
         $kelas = Kelas::findOrFail($kelasId);

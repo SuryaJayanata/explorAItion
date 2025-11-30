@@ -20,27 +20,113 @@ class TugasController extends Controller
 
     public function store(Request $request, $kelasId)
     {
-        $kelas = Kelas::findOrFail($kelasId);
-        $this->authorize('create', [Tugas::class, $kelas]);
-        
-        $request->validate([
-            'judul' => 'required|string|max:150',
-            'deskripsi' => 'required|string',
-            'deadline' => 'required|date',
-        ]);
-
-        $tugas = Tugas::create([
-            'judul' => $request->judul,
-            'deskripsi' => $request->deskripsi,
-            'deadline' => $request->deadline,
-            'id_kelas' => $kelasId,
-        ]);
-
-        // Trigger notifikasi tugas baru
-        NotifikasiService::notifyTugasBaru($kelas, $tugas);
-
-        return redirect()->route('kelas.show', $kelasId)
-            ->with('success', 'Assignment created successfully!');
+        try {
+            \Log::info('=== TUGAS STORE START ===');
+            \Log::info('Request data:', $request->all());
+            \Log::info('Files:', $request->allFiles());
+    
+            $kelas = Kelas::findOrFail($kelasId);
+            \Log::info('Kelas found: ' . $kelas->id_kelas);
+            
+            $this->authorize('create', [Tugas::class, $kelas]);
+            \Log::info('Authorization passed');
+    
+            // Validasi dasar dulu
+            $request->validate([
+                'judul' => 'required|string|max:150',
+                'deskripsi' => 'required|string',
+                'deadline' => 'required|date',
+            ]);
+    
+            \Log::info('Basic validation passed');
+    
+            // Handle file upload untuk kunci jawaban (jika ada)
+            $kunciJawabanFilePath = null;
+            if ($request->hasFile('kunci_jawaban_file')) {
+                \Log::info('Kunci jawaban file detected');
+                $request->validate([
+                    'kunci_jawaban_file' => 'file|mimes:pdf,txt|max:10240',
+                ]);
+                $kunciJawabanFilePath = $request->file('kunci_jawaban_file')->store('kunci_jawaban', 'public');
+                \Log::info('Kunci jawaban file stored: ' . $kunciJawabanFilePath);
+            }
+    
+            // Handle auto grading fields
+            $autoGrading = $request->has('auto_grading');
+            $passingGrade = $request->passing_grade ?? 70.00;
+            
+            \Log::info('Auto grading: ' . ($autoGrading ? 'Yes' : 'No'));
+            \Log::info('Passing grade: ' . $passingGrade);
+    
+            // Data untuk create tugas
+            $tugasData = [
+                'judul' => $request->judul,
+                'deskripsi' => $request->deskripsi,
+                'deadline' => $request->deadline,
+                'id_kelas' => $kelasId,
+                'auto_grading' => $autoGrading,
+                'passing_grade' => $passingGrade,
+            ];
+    
+            // Tambahkan kunci jawaban jika ada
+            if ($kunciJawabanFilePath) {
+                $tugasData['kunci_jawaban_file'] = $kunciJawabanFilePath;
+            }
+    
+            if ($request->filled('kunci_jawaban_text')) {
+                $tugasData['kunci_jawaban_text'] = $request->kunci_jawaban_text;
+                \Log::info('Kunci jawaban text provided');
+            }
+    
+            \Log::info('Creating tugas with data:', $tugasData);
+    
+            $tugas = Tugas::create($tugasData);
+            \Log::info('Tugas created successfully. ID: ' . $tugas->id_tugas);
+    
+            // Trigger notifikasi
+            NotifikasiService::notifyTugasBaru($kelas, $tugas);
+            \Log::info('Notification sent');
+    
+            // Response untuk AJAX
+            if ($request->ajax()) {
+                \Log::info('Returning AJAX success response');
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Assignment created successfully!',
+                    'redirect_url' => route('kelas.show', $kelasId)
+                ]);
+            }
+    
+            \Log::info('=== TUGAS STORE END - SUCCESS ===');
+            return redirect()->route('kelas.show', $kelasId)
+                ->with('success', 'Assignment created successfully!');
+    
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            \Log::error('Validation error: ' . json_encode($e->errors()));
+            if ($request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation error',
+                    'errors' => $e->errors()
+                ], 422);
+            }
+            return redirect()->back()->withErrors($e->errors())->withInput();
+            
+        } catch (\Exception $e) {
+            \Log::error('Error in TugasController@store: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            
+            if ($request->ajax()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error: ' . $e->getMessage()
+                ], 500);
+            }
+    
+            return redirect()->back()
+                ->with('error', 'Terjadi kesalahan: ' . $e->getMessage())
+                ->withInput();
+        }
     }
 
     public function show($kelasId, $tugasId)

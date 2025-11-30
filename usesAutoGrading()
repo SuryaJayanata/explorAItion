@@ -1,0 +1,1 @@
+"  Uses auto grading: " . ($tugasAuto- ? 'Yes' : 'No') . "\n";

@@ -42,4 +42,20 @@ class PengumpulanTugas extends Model
     {
         return $this->hasOne(Nilai::class, 'id_pengumpulan', 'id_pengumpulan');
     }
+    // Di dalam class PengumpulanTugas
+public function appeals()
+{
+    return $this->hasMany(Appeal::class, 'id_pengumpulan', 'id_pengumpulan');
+}
+
+public function hasPendingAppeal()
+{
+    return $this->appeals()->where('status', 'pending')->exists();
+}
+
+public function getAppealStatusAttribute()
+{
+    $latestAppeal = $this->appeals()->latest()->first();
+    return $latestAppeal ? $latestAppeal->status : null;
+}
 }

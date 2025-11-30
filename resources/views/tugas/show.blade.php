@@ -124,6 +124,7 @@
         <!-- Student View -->
         @if(Auth::user()->isSiswa())
         @include('tugas.partials.student-view')
+        @include('tugas.partials.appeal-form')
         @endif
 
         <!-- Teacher View - Student Submissions -->
@@ -140,6 +141,7 @@
                     {{ $tugas->pengumpulan->count() }} / {{ $semuaSiswa->count() }} submitted
                 </div>
             </div>
+            
 
             <!-- Submission Statistics -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -256,6 +258,48 @@
                         </div>
                     </div>
                     @endif
+                    <!-- Di dalam teacher view, setelah submission details -->
+@if($pengumpulan && $pengumpulan->appeals->count() > 0)
+<div class="mt-4 pt-4 border-t border-white/10">
+    <h5 class="text-white font-semibold mb-2 flex items-center">
+        <svg class="w-4 h-4 mr-2 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        History Banding
+    </h5>
+    @foreach($pengumpulan->appeals as $appeal)
+    <div class="bg-white/5 rounded-lg p-4 mb-2 border border-white/10">
+        <div class="flex justify-between items-start mb-2">
+            <div class="flex items-center">
+                <span class="px-2 py-1 rounded-full text-xs font-medium 
+                    @if($appeal->status === 'pending') bg-yellow-500/20 text-yellow-400
+                    @elseif($appeal->status === 'approved') bg-green-500/20 text-green-400
+                    @else bg-red-500/20 text-red-400 @endif">
+                    {{ strtoupper($appeal->status) }}
+                </span>
+                <span class="text-white/60 text-sm ml-2">
+                    {{ $appeal->created_at->format('d M Y H:i') }}
+                </span>
+            </div>
+        </div>
+        
+        <div class="mb-2">
+            <p class="text-white/80 text-sm"><strong>Alasan Banding:</strong></p>
+            <p class="text-white/90">{{ $appeal->alasan_banding }}</p>
+        </div>
+        
+        @if($appeal->catatan_guru)
+        <div class="mt-2 pt-2 border-t border-white/10">
+            <p class="text-white/80 text-sm"><strong>Catatan Guru:</strong></p>
+            <p class="text-white/90">{{ $appeal->catatan_guru }}</p>
+        </div>
+        @endif
+        
+
+    </div>
+    @endforeach
+</div>
+@endif
                 </div>
                 @endforeach
             </div>
@@ -303,10 +347,284 @@
     </div>
 </div>
 @endif
+<!-- Appeal Modal untuk Guru -->
+@if(Auth::user()->isGuru() && $tugas->kelas->id_guru == Auth::id())
+<!-- Modal Terima Appeal -->
+<div id="appealModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-gradient-to-b from-gray-700 to-purple-900 rounded-2xl border border-white/30 backdrop-blur-md p-6 md:p-8 w-full max-w-md mx-4 relative">
+        <button onclick="closeAppealModal()" class="absolute top-4 right-4 text-white hover:text-primary transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+        </button>
+        
+        <h2 class="text-2xl md:text-3xl font-bold mb-6 text-center text-white">Terima Banding</h2>
+        
+        <form id="appealForm" method="POST">
+            @csrf
+            <div class="mb-4">
+                <label class="block text-white/90 mb-2">Nilai Saat Ini</label>
+                <p id="currentGrade" class="text-white text-lg font-semibold">-</p>
+            </div>
+            
+            <div class="mb-6">
+                <label for="nilai_baru" class="block text-lg mb-3 text-white/90">Nilai Baru (0-100)</label>
+                <input type="number" id="nilai_baru" name="nilai_baru" min="0" max="100" 
+                       class="w-full bg-white/10 border border-white/30 rounded-lg px-4 py-3 text-white outline-none focus:border-primary"
+                       placeholder="Masukkan nilai baru" required>
+            </div>
+            
+            <div class="mb-6">
+                <label for="catatan_guru" class="block text-lg mb-3 text-white/90">Catatan untuk Siswa</label>
+                <textarea id="catatan_guru" name="catatan_guru" rows="4"
+                          class="w-full bg-white/10 border border-white/30 rounded-lg px-4 py-3 text-white outline-none focus:border-primary resize-none"
+                          placeholder="Berikan catatan atau feedback untuk siswa..."
+                          required></textarea>
+            </div>
+            
+            <button type="submit" 
+                    class="w-full bg-green-500 py-4 rounded-lg text-white text-lg font-medium shadow-lg shadow-green-500/30 hover:shadow-green-500/50 transition-all">
+                Simpan Perubahan Nilai
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal Tolak Appeal -->
+<div id="rejectModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+    <div class="bg-gradient-to-b from-gray-700 to-purple-900 rounded-2xl border border-white/30 backdrop-blur-md p-6 md:p-8 w-full max-w-md mx-4 relative">
+        <button onclick="closeRejectModal()" class="absolute top-4 right-4 text-white hover:text-primary transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+        </button>
+        
+        <h2 class="text-2xl md:text-3xl font-bold mb-6 text-center text-white">Tolak Banding</h2>
+        
+        <form id="rejectForm" method="POST">
+            @csrf
+            <div class="mb-6">
+                <label for="alasan_penolakan" class="block text-lg mb-3 text-white/90">Alasan Penolakan</label>
+                <textarea id="alasan_penolakan" name="alasan_penolakan" rows="4"
+                          class="w-full bg-white/10 border border-white/30 rounded-lg px-4 py-3 text-white outline-none focus:border-primary resize-none"
+                          placeholder="Jelaskan alasan penolakan banding..."
+                          required></textarea>
+            </div>
+            
+            <div class="flex space-x-3">
+                <button type="button" onclick="closeRejectModal()"
+                        class="flex-1 bg-gray-500 py-3 rounded-lg text-white font-medium transition-colors">
+                    Batal
+                </button>
+                <button type="submit" 
+                        class="flex-1 bg-red-500 py-3 rounded-lg text-white font-medium shadow-lg shadow-red-500/30 hover:shadow-red-500/50 transition-all">
+                    Tolak Banding
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+@endif
 @endsection
 
 @push('scripts')
 <script>
+    // ==================== APPEAL MODAL FUNCTIONS (FOR TEACHERS) ====================
+@if(Auth::user()->isGuru() && $tugas->kelas->id_guru == Auth::id())
+
+function openAppealModal(appealId, currentGrade) {
+    const modal = document.getElementById('appealModal');
+    const form = document.getElementById('appealForm');
+    const currentGradeEl = document.getElementById('currentGrade');
+    const nilaiBaruInput = document.getElementById('nilai_baru');
+    
+    // Set form action
+    form.action = `/kelas/{{ $tugas->kelas->id_kelas }}/tugas/{{ $tugas->id_tugas }}/appeal/${appealId}`;
+    
+    // Set current grade
+    currentGradeEl.textContent = currentGrade && currentGrade !== 'null' ? `${currentGrade}/100` : 'Belum dinilai';
+    
+    // Set default nilai baru (sama dengan nilai lama atau 0)
+    nilaiBaruInput.value = currentGrade && currentGrade !== 'null' ? currentGrade : '';
+    
+    // Show modal
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    
+    // Focus on nilai baru input
+    setTimeout(() => {
+        nilaiBaruInput.focus();
+    }, 300);
+}
+
+function openRejectModal(appealId) {
+    const modal = document.getElementById('rejectModal');
+    const form = document.getElementById('rejectForm');
+    
+    // Set form action
+    form.action = `/kelas/{{ $tugas->kelas->id_kelas }}/tugas/{{ $tugas->id_tugas }}/appeal/${appealId}/reject`;
+    
+    // Show modal
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+function closeAppealModal() {
+    const modal = document.getElementById('appealModal');
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+
+function closeRejectModal() {
+    const modal = document.getElementById('rejectModal');
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
+    document.body.style.overflow = 'auto';
+}
+
+// Appeal form submission dengan AJAX
+document.addEventListener('DOMContentLoaded', function() {
+    const appealForm = document.getElementById('appealForm');
+    if (appealForm) {
+        appealForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const submitButton = this.querySelector('button[type="submit"]');
+            const originalContent = submitButton.innerHTML;
+            
+            // Validate grade
+            const nilaiBaru = formData.get('nilai_baru');
+            if (nilaiBaru < 0 || nilaiBaru > 100) {
+                showToast('Please enter a grade between 0 and 100.', 'error');
+                return;
+            }
+            
+            // Disable button dan show loading
+            submitButton.disabled = true;
+            submitButton.innerHTML = `
+                <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Menyimpan...
+            `;
+            
+            fetch(this.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Nilai berhasil diperbarui!', 'success');
+                    closeAppealModal();
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    throw new Error(data.message || 'Failed to update grade');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showToast('Gagal memperbarui nilai. Silakan coba lagi.', 'error');
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalContent;
+            });
+        });
+    }
+
+    // Reject form submission
+    const rejectForm = document.getElementById('rejectForm');
+    if (rejectForm) {
+        rejectForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const submitButton = this.querySelector('button[type="submit"]');
+            const originalContent = submitButton.innerHTML;
+            
+            // Disable button dan show loading
+            submitButton.disabled = true;
+            submitButton.innerHTML = `
+                <svg class="animate-spin -ml-1 mr-2 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Memproses...
+            `;
+            
+            fetch(this.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Banding berhasil ditolak.', 'success');
+                    closeRejectModal();
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    throw new Error(data.message || 'Failed to reject appeal');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showToast('Gagal menolak banding. Silakan coba lagi.', 'error');
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalContent;
+            });
+        });
+    }
+
+    // Close modals when clicking outside
+    const appealModal = document.getElementById('appealModal');
+    const rejectModal = document.getElementById('rejectModal');
+    
+    if (appealModal) {
+        appealModal.addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeAppealModal();
+            }
+        });
+    }
+    
+    if (rejectModal) {
+        rejectModal.addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeRejectModal();
+            }
+        });
+    }
+
+    // Close modals with Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeAppealModal();
+            closeRejectModal();
+        }
+    });
+});
+
+@endif
     // ==================== GRADE MODAL FUNCTIONS (FOR TEACHERS) ====================
     @if(Auth::user()->isGuru() && $tugas->kelas->id_guru == Auth::id())
 

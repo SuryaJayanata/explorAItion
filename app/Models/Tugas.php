@@ -12,7 +12,6 @@ class Tugas extends Model
     protected $primaryKey = 'id_tugas';
     public $incrementing = true;
 
-    // Tentukan nama tabel secara eksplisit
     protected $table = 'tugas';
 
     protected $fillable = [
@@ -20,10 +19,16 @@ class Tugas extends Model
         'deskripsi',
         'deadline',
         'id_kelas',
+        'kunci_jawaban_file',
+        'kunci_jawaban_text',
+        'auto_grading',
+        'passing_grade',
     ];
 
     protected $casts = [
         'deadline' => 'datetime',
+        'auto_grading' => 'boolean',
+        'passing_grade' => 'decimal:2',
     ];
 
     public function kelas()
@@ -41,13 +46,15 @@ class Tugas extends Model
         return $this->hasMany(Komentar::class, 'id_target', 'id_tugas')
                     ->where('tipe', 'tugas');
     }
-    public function isDeadlinePassed()
-{
-    return now()->greaterThan($this->deadline);
-}
 
-public function isDeadlineNear()
-{
-    return now()->addDays(1)->greaterThan($this->deadline) && !$this->isDeadlinePassed();
-}
+    public function isDeadlinePassed()
+    {
+        return now()->greaterThan($this->deadline);
+    }
+
+    // Method untuk cek apakah tugas menggunakan auto grading
+    public function usesAutoGrading()
+    {
+        return $this->auto_grading && ($this->kunci_jawaban_file || $this->kunci_jawaban_text);
+    }
 }

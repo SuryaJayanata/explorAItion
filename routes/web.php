@@ -13,6 +13,7 @@ use App\Http\Controllers\PengumpulanTugasController;
 use App\Http\Controllers\NotifikasiController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\AppealController; // Tambahkan ini
 use App\Http\Middleware\AdminMiddleware;
 use Illuminate\Support\Facades\Route;
 
@@ -83,6 +84,8 @@ Route::middleware('auth')->group(function () {
     
     Route::prefix('kelas/{kelasId}')->group(function () {
         // Summary routes
+        Route::post('/tugas/{tugasId}/appeal/{appealId}/reject', [AppealController::class, 'rejectAppeal'])
+    ->name('kelas.tugas.appeal.reject');
         Route::post('/materi/{materiId}/generate-summary', [MateriController::class, 'generateSummary'])
             ->name('kelas.materi.generate-summary');
         Route::get('/materi/{materiId}/download-summary', [MateriController::class, 'downloadSummary'])
@@ -98,6 +101,10 @@ Route::middleware('auth')->group(function () {
 
         // Nilai Routes
         Route::post('/tugas/{tugasId}/pengumpulan/{pengumpulanId}/nilai', [NilaiController::class, 'store'])->name('kelas.tugas.pengumpulan.nilai');
+
+        // Appeal Routes untuk Auto Grading
+        Route::post('/tugas/{tugasId}/appeal', [AppealController::class, 'store'])->name('kelas.tugas.appeal');
+        Route::put('/tugas/{tugasId}/appeal/{appealId}', [AppealController::class, 'updateGrade'])->name('kelas.tugas.appeal.update');
 
         // Materials Routes
         Route::get('/materi/create', [MateriController::class, 'create'])->name('kelas.materi.create');
@@ -119,6 +126,11 @@ Route::middleware('auth')->group(function () {
         Route::post('/tugas/{tugasId}/pengumpulan', [PengumpulanTugasController::class, 'store'])->name('kelas.tugas.pengumpulan.store');
         Route::put('/tugas/{tugasId}/pengumpulan/{pengumpulanId}', [PengumpulanTugasController::class, 'update'])->name('kelas.tugas.pengumpulan.update');
         Route::delete('/tugas/{tugasId}/pengumpulan/{pengumpulanId}', [PengumpulanTugasController::class, 'destroy'])->name('kelas.tugas.pengumpulan.destroy');
+        
+        // Manual trigger auto grading (untuk testing)
+        Route::post('/tugas/{tugasId}/pengumpulan/{pengumpulanId}/trigger-grading', 
+            [PengumpulanTugasController::class, 'triggerAutoGrading'])
+            ->name('kelas.tugas.pengumpulan.trigger-grading');
     });
     
     // Global Materials Routes
@@ -139,4 +151,18 @@ Route::get('/test-csrf', function() {
         'csrf_token' => csrf_token(),
         'session_id' => session()->getId()
     ]);
+});
+
+// API Routes untuk Auto Grading (jika diperlukan)
+Route::prefix('api')->middleware('auth')->group(function () {
+    Route::post('/auto-grade/{pengumpulanId}', [PengumpulanTugasController::class, 'triggerAutoGrading'])
+        ->name('api.auto-grade');
+    
+    Route::get('/appeals/pending', [AppealController::class, 'getPendingAppeals'])
+        ->name('api.appeals.pending');
+});
+
+// Fallback Route
+Route::fallback(function () {
+    return response()->view('errors.404', [], 404);
 });

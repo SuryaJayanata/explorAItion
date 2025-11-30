@@ -9,7 +9,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('materi', function (Blueprint $table) {
-            $table->json('flashcards')->nullable()->after('summary');
+            if (!Schema::hasColumn('materi', 'flashcards')) {
+                $table->json('flashcards')->nullable()->after('summary');
+            }
         });
     }
 
